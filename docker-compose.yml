@@ -1,4 +1,4 @@
-
+version: '3.8'
 
 volumes:
   pg_data:
@@ -10,24 +10,45 @@ services:
     image: postgres:13
     env_file: .env
     volumes:
-      - pg_data:/var/lib/postgres/data
+      - pg_data:/var/lib/postgresql/data  # Исправлено: postgresql/data, а не postgres/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kittygram_user -d kittygram"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     image: zhumar/kittygram_backend
     env_file: .env
     volumes:
-      - static:/static/
+      - static:/app/static/
       - media:/app/media/
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn --bind 0.0.0.0:8000 kittygram_backend.wsgi"
+    restart: unless-stopped
+
   frontend:
-    env_file: .env
     image: zhumar/kittygram_frontend
-    command: cp -r /app/build/. /static/
+    env_file: .env
     volumes:
       - static:/static
+    command: sh -c "cp -r /app/build/. /static/ && tail -f /dev/null"
+    restart: unless-stopped
+
   gateway:
     image: zhumar/kittygram_gateway
-    env_file: .env
     ports:
-      - 9000:80
+      - "9000:80"
     volumes:
       - static:/static
-      - media:/app/media/
+      - media:/media  # Исправлено: должно быть /media, а не /app/media
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
